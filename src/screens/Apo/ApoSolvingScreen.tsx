@@ -16,6 +16,7 @@ export default function ApoSolvingScreen({ navigation, route }: Props) {
   const s = styles(theme, insets);
   const question: string = route?.params?.question ?? 'Вопрос';
   const options: string[] = route?.params?.options ?? [];
+  const queue: { question: string; options: string[] }[] = route?.params?.queue ?? [];
   const [error, setError] = useState<string | null>(null);
 
   useEffect(() => {
@@ -37,6 +38,7 @@ export default function ApoSolvingScreen({ navigation, route }: Props) {
             confidence: r.confidence,
             ms: r.ms,
             lowAccuracy: r.lowAccuracy,
+            queue,
           });
         }
       } catch (e) {

@@ -2,17 +2,9 @@ import React, { useState } from 'react';
 import { View, Text, Pressable, StyleSheet, ScrollView, Alert } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { Ionicons } from '@expo/vector-icons';
-import * as DocumentPicker from 'expo-document-picker';
+import * as ImagePicker from 'expo-image-picker';
 import { useTheme } from './apoTheme';
-
-declare const require: any;
-function getImagePicker(): any | null {
-  try {
-    return require('expo-image-picker');
-  } catch {
-    return null;
-  }
-}
+import { useApoUI } from './apoUI';
 
 interface Props {
   navigation: any;
@@ -21,6 +13,7 @@ interface Props {
 
 export default function ApoCaptureScreen({ navigation, route }: Props) {
   const { theme } = useTheme();
+  const { openDrawer } = useApoUI();
   const insets = useSafeAreaInsets();
   const [picked, setPicked] = useState<{ name: string; uri: string }[]>([]);
   const s = styles(theme, insets);
@@ -32,52 +25,30 @@ export default function ApoCaptureScreen({ navigation, route }: Props) {
   };
 
   const shootPhoto = async () => {
-    const IP = getImagePicker();
-    if (IP) {
-      try {
-        const perm = await IP.requestCameraPermissionsAsync();
-        if (perm.status !== 'granted') {
-          Alert.alert('Нет доступа', 'Разрешите доступ к камере в настройках');
-          return;
-        }
-        const res = await IP.launchCameraAsync({ quality: 0.9 });
-        if (!res.canceled && res.assets[0]) {
-          const a = res.assets[0];
-          addPicked(a.fileName ?? 'photo.jpg', a.uri);
-          return;
-        }
-      } catch (e) {
-        console.warn('camera error:', e);
-      }
-    }
-    // Запасной путь без expo-image-picker: выбор кадра через файлы.
     try {
-      const res = await DocumentPicker.getDocumentAsync({ type: 'image/*', copyToCacheDirectory: true });
-      if (!res.canceled && res.assets[0]) addPicked(res.assets[0].name, res.assets[0].uri);
+      const perm = await ImagePicker.requestCameraPermissionsAsync();
+      if (!perm.granted) {
+        Alert.alert('Нет доступа', 'Разрешите доступ к камере в настройках');
+        return;
+      }
+      const res = await ImagePicker.launchCameraAsync({ quality: 0.9 });
+      if (!res.canceled && res.assets[0]) {
+        const a = res.assets[0];
+        addPicked(a.fileName ?? 'photo.jpg', a.uri);
+      }
     } catch (e) {
-      console.warn('pick error:', e);
+      console.warn('camera error:', e);
     }
   };
 
   const pickGallery = async () => {
-    const IP = getImagePicker();
-    if (IP) {
-      try {
-        const res = await IP.launchImageLibraryAsync({ quality: 0.9 });
-        if (!res.canceled && res.assets[0]) {
-          const a = res.assets[0];
-          addPicked(a.fileName ?? 'gallery.jpg', a.uri);
-          return;
-        }
-      } catch (e) {
-        console.warn('gallery error:', e);
-      }
-    }
     try {
-      const res = await DocumentPicker.getDocumentAsync({ type: 'image/*', copyToCacheDirectory: true });
-      if (!res.canceled && res.assets[0]) addPicked(res.assets[0].name, res.assets[0].uri);
+      const res = await ImagePicker.launchImageLibraryAsync({ quality: 0.9, allowsMultipleSelection: true });
+      if (!res.canceled) {
+        for (const a of res.assets.slice(0, 5)) addPicked(a.fileName ?? 'gallery.jpg', a.uri);
+      }
     } catch (e) {
-      console.warn('pick error:', e);
+      console.warn('gallery error:', e);
     }
   };
 
@@ -97,6 +68,9 @@ export default function ApoCaptureScreen({ navigation, route }: Props) {
           <Text style={s.backText}>Назад</Text>
         </Pressable>
         <View style={s.tagLive}><Text style={s.tagText}>Камера · авто</Text></View>
+        <Pressable style={s.iconBtn} onPress={openDrawer}>
+          <Ionicons name="settings-outline" size={18} color={theme.textSecondary} />
+        </Pressable>
       </View>
 
       <View style={s.cam}>
@@ -116,7 +90,7 @@ export default function ApoCaptureScreen({ navigation, route }: Props) {
           </Pressable>
         </View>
 
-        <Text style={s.sect}>Выбрано: {picked.length}</Text>
+        <Text style={s.sect}>Кадры: {picked.length}</Text>
         <ScrollView horizontal showsHorizontalScrollIndicator={false} style={s.strip}>
           {picked.map((p, i) => (
             <View key={i} style={s.cellSel}>
@@ -156,6 +130,7 @@ function styles(theme: any, insets: any) {
     backText: { color: '#8A94A6', fontSize: 13, fontWeight: '600' },
     tagLive: { backgroundColor: '#131A26', borderRadius: 99, paddingHorizontal: 10, paddingVertical: 6 },
     tagText: { fontSize: 11, fontWeight: '800', color: '#B9C9EE' },
+    iconBtn: { width: 44, height: 44, borderRadius: 14, backgroundColor: '#131A26', alignItems: 'center', justifyContent: 'center' },
     cam: { flex: 1, marginTop: 12, backgroundColor: '#05070C', alignItems: 'center', justifyContent: 'center' },
     frame: { width: '78%', height: '52%', borderWidth: 2, borderColor: '#4F7CFF', borderRadius: 14 },
     frameHint: { position: 'absolute', bottom: 12, color: '#4F7CFF', fontSize: 11.5, fontWeight: '700' },
@@ -171,7 +146,6 @@ function styles(theme: any, insets: any) {
     cellSel: { width: 100, height: 64, borderRadius: 12, backgroundColor: 'rgba(79,124,255,.1)', borderWidth: 1.5, borderColor: '#4F7CFF', alignItems: 'center', justifyContent: 'center', marginRight: 8, paddingHorizontal: 6 },
     cellText: { fontSize: 10, color: '#B9C9EE', marginTop: 2 },
     shutterbar: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', paddingHorizontal: 26, marginTop: 12 },
-    iconBtn: { width: 44, height: 44, borderRadius: 14, backgroundColor: '#131A26', alignItems: 'center', justifyContent: 'center' },
     shutter: { width: 68, height: 68, borderRadius: 34, backgroundColor: '#FFF', borderWidth: 6, borderColor: '#4F7CFF' },
     cta: { flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 8, borderRadius: 16, padding: 15, marginTop: 12, backgroundColor: '#4F7CFF' },
     ctaText: { fontWeight: '800', fontSize: 16, color: '#FFF' },
