@@ -1,17 +1,21 @@
-// apo/explain — explainText with persistent cache (apo_explain_cache_v1).
-// MVP text is a local template; buildExplainPrompt shapes the same request
-// for the remote explanation model without any network in MVP.
+// apo/explain — cache-first explanations. Local persistent cache
+// (apo_explain_cache_v1) is real storage, not a mock; misses go to the
+// backend, which calls the explanation model server-side.
 
 import { cacheKey } from './hash';
 import { APO_KEYS, loadJson, saveJson } from './store';
+import { apiConfigured, explainRemote, ApoApiError } from './api';
+import { getDeviceId } from './device';
 
 export interface ExplainResult {
   text: string;
   cached: boolean;
   provider: string;
+  /** Present when no explanation was produced. */
+  error?: string;
 }
 
-/** Prompt shape for the remote explanation model (DeepSeek-class, RU). */
+/** Prompt shape for the remote explanation model (RU). Mirrored server-side. */
 export function buildExplainPrompt(stem: string, answer: string): string {
   return (
     `Объясни коротко и по шагам, почему правильный ответ — «${answer}», ` +
@@ -23,13 +27,17 @@ export async function explainText(stem: string, answer: string): Promise<Explain
   const key = cacheKey(['explain-v1', stem, answer]);
   const cache = await loadJson<Record<string, string>>(APO_KEYS.explainCache, {});
   const hit = cache[key];
-  if (typeof hit === 'string') return { text: hit, cached: true, provider: 'local-baseline' };
-  const text =
-    `Ответ: ${answer}.\n` +
-    'Почему: ключевые слова вопроса пересекаются именно с этим вариантом сильнее, чем с остальными. ' +
-    'Проверь: перечитай вопрос, отбрось варианты с лишними условиями, сверь оставшийся с вопросом дословно. ' +
-    'Если точность ниже 75% — перепроверь по учебнику.';
-  cache[key] = text;
-  await saveJson(APO_KEYS.explainCache, cache);
-  return { text, cached: false, provider: 'local-baseline' };
+  if (typeof hit === 'string') return { text: hit, cached: true, provider: 'cache' };
+  if (!apiConfigured()) {
+    return { text: '', cached: false, provider: 'none', error: 'no-server' };
+  }
+  try {
+    const deviceId = await getDeviceId();
+    const r = await explainRemote(deviceId, null, stem, answer);
+    cache[key] = r.text;
+    await saveJson(APO_KEYS.explainCache, cache);
+    return { text: r.text, cached: r.cached, provider: 'model' };
+  } catch (e) {
+    return { text: '', cached: false, provider: 'none', error: e instanceof ApoApiError ? e.code : 'request-failed' };
+  }
 }
