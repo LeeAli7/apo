@@ -1,9 +1,9 @@
-// apo/solver — solveTest with confidence + lowAccuracy gate (0.75).
-// MVP provider is a local token-overlap baseline (offline, honest, fast).
-// buildChoicePayload shapes the same question for the remote decision
-// engine (state + Choice) without any network in MVP.
+// apo/solver — remote-only solving. No local mock: without a configured
+// backend (or without provider keys on it) solveTest returns an honest
+// error state instead of inventing an answer.
 
-import { cacheKey } from './hash';
+import { apiConfigured, solveRemote, ApoApiError } from './api';
+import { getDeviceId } from './device';
 
 export const APO_ACCURACY_THRESHOLD = 0.75;
 
@@ -20,59 +20,42 @@ export interface SolveResult {
   lowAccuracy: boolean;
   provider: string;
   cacheHit: boolean;
+  /** Present when no answer was produced: 'no-server' | provider codes. */
+  error?: string;
 }
 
-const solveMem = new Map<string, SolveResult>();
-
-function tokens(s: string): string[] {
-  const m = s.toLowerCase().match(/[a-zа-яё0-9]+/gi);
-  return m ? m.filter((t) => t.length > 2) : [];
-}
-
-export function solveTestLocal(input: SolveInput): SolveResult {
-  const { stem, options } = input;
-  if (options.length === 0) {
-    return {
-      choice: '',
-      choiceIndex: -1,
-      probabilities: [],
-      confidence: 0,
-      lowAccuracy: true,
-      provider: 'local-baseline',
-      cacheHit: false,
-    };
-  }
-  const key = cacheKey(['solve-v1', stem, ...options]);
-  const hit = solveMem.get(key);
-  if (hit) return { ...hit, cacheHit: true };
-
-  const stemSet = new Set(tokens(stem));
-  const scores = options.map((o) => {
-    let s = 0;
-    for (const t of tokens(o)) if (stemSet.has(t)) s += 1;
-    return s;
-  });
-  const exps = scores.map((s) => Math.exp(s));
-  const sum = exps.reduce((a, b) => a + b, 0);
-  const probs = exps.map((e) => e / sum);
-  let best = 0;
-  for (let i = 1; i < probs.length; i++) if (probs[i] > probs[best]) best = i;
-  const round3 = (v: number): number => Math.round(v * 1000) / 1000;
-  const res: SolveResult = {
-    choice: options[best],
-    choiceIndex: best,
-    probabilities: probs.map(round3),
-    confidence: round3(probs[best]),
-    lowAccuracy: probs[best] < APO_ACCURACY_THRESHOLD,
-    provider: 'local-baseline',
+function errorResult(code: string): SolveResult {
+  return {
+    choice: '',
+    choiceIndex: -1,
+    probabilities: [],
+    confidence: 0,
+    lowAccuracy: true,
+    provider: 'none',
     cacheHit: false,
+    error: code,
   };
-  solveMem.set(key, res);
-  return res;
 }
 
 export async function solveTest(input: SolveInput): Promise<SolveResult> {
-  return solveTestLocal(input);
+  if (input.options.length === 0) return errorResult('open-question');
+  if (!apiConfigured()) return errorResult('no-server');
+  try {
+    const deviceId = await getDeviceId();
+    const r = await solveRemote(deviceId, null, input.stem, input.options);
+    const idx = r.choiceIndex >= 0 && r.choiceIndex < input.options.length ? r.choiceIndex : -1;
+    return {
+      choice: idx >= 0 ? input.options[idx] : '',
+      choiceIndex: idx,
+      probabilities: r.probabilities,
+      confidence: r.confidence,
+      lowAccuracy: r.lowAccuracy,
+      provider: r.provider,
+      cacheHit: r.cached,
+    };
+  } catch (e) {
+    return errorResult(e instanceof ApoApiError ? e.code : 'request-failed');
+  }
 }
 
 export interface ChoicePayload {
@@ -82,7 +65,11 @@ export interface ChoicePayload {
   };
 }
 
-/** Shape for the remote decision engine: question -> state, options -> Choice criteria. */
+/**
+ * Reference shape for the remote decision engine: question -> state,
+ * options -> Choice criteria. Mirrored by server/src/providers.ts —
+ * keep both in sync when the mapping changes.
+ */
 export function buildChoicePayload(input: SolveInput): ChoicePayload {
   const criteria: Record<string, string> = {};
   input.options.forEach((o, i) => {

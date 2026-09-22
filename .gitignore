@@ -4,3 +4,7 @@ android/
 ios/
 dist/
 *.log
+server/dist/
+server/.env
+server/*.db
+*.db

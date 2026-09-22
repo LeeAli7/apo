@@ -4,6 +4,8 @@
 
 import { loadReadable } from '../../utils/documentLoader';
 import { getExtension } from '../../utils/fileTypes';
+import { apiConfigured, structureRemote, ApoApiError } from './api';
+import { getDeviceId } from './device';
 
 export interface ApoFileInput {
   name: string;
@@ -159,6 +161,29 @@ export async function ingestFile(file: ApoFileInput): Promise<IngestResult> {
     return { text: '', questions: [], warnings };
   }
   const questions = parseQuestions(text);
+  if (questions.length === 0 || questions.every((q) => q.open)) {
+    // Local parse found no usable structure — ask the backend (model
+    // structuring) before falling back to a single open question.
+    if (apiConfigured()) {
+      try {
+        const deviceId = await getDeviceId();
+        const s = await structureRemote(deviceId, null, text.slice(0, 8000));
+        if (s.stem) {
+          return {
+            text,
+            questions: [{ stem: s.stem, options: s.options, open: s.open }],
+            warnings,
+          };
+        }
+      } catch (e) {
+        warnings.push(
+          e instanceof ApoApiError && e.code === 'no-provider-key'
+            ? 'structure-unavailable: на сервере нет ключа модели — разбор только локальный'
+            : 'structure-failed: серверный разбор не удался — разбор только локальный',
+        );
+      }
+    }
+  }
   if (questions.length === 0) {
     warnings.push('no-questions: разбивка не нашла вопросов — один открытый вопрос');
     return { text, questions: [{ stem: text.slice(0, MAX_STEM), options: [], open: true }], warnings };
