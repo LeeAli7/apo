@@ -5,6 +5,8 @@
 import { loadReadable } from '../../utils/documentLoader';
 import { getExtension } from '../../utils/fileTypes';
 import { File } from 'expo-file-system';
+import { manipulateAsync, SaveFormat } from 'expo-image-manipulator';
+import { Image } from 'react-native';
 import { apiConfigured, structureRemote, parseDocumentRemote, ApoApiError } from './api';
 import { getDeviceId } from './device';
 
@@ -31,6 +33,10 @@ const IMAGE_EXTS = new Set(['jpg', 'jpeg', 'png', 'webp', 'heic', 'heif', 'bmp',
 // Formats the vision model accepts directly.
 const VISION_EXTS = new Set(['jpg', 'jpeg', 'png', 'webp']);
 const MAX_LOCAL_BYTES = 15 * 1024 * 1024;
+/** Long side cap for uploads: fewer timeouts, cheaper vision, faster answers. */
+export const APO_IMAGE_MAX_SIDE = 1600;
+/** JPEG quality for uploads: text stays readable, bytes drop ~10x. */
+export const APO_IMAGE_JPEG_QUALITY = 0.8;
 
 /** Read any local file as base64 via the SDK57 File API.
  * NOTE: legacy readAsStringAsync/getInfoAsync from 'expo-file-system' THROW
@@ -69,25 +75,90 @@ export async function readUriBase64(uri: string): Promise<string> {
 }
 
 /**
+ * Photos/screenshots for upload: downscale to max 1600px long side,
+ * JPEG 0.8, base64 straight from the manipulator (no extra file read).
+ * Small images pass through without upscaling. The filename is rewritten
+ * to .jpg because the bytes are always JPEG now (server sniffs mime by ext).
+ * Exported as a test seam (device image pipeline can't run in Node).
+ */
+export async function prepareImageForUpload(
+  uri: string,
+  filename: string,
+): Promise<{ base64: string; filename: string }> {
+  const size: { width: number; height: number } = await new Promise((resolve, reject) => {
+    Image.getSize(
+      uri,
+      (width, height) => resolve({ width, height }),
+      (e: unknown) => reject(new Error(`size-probe-failed: ${e instanceof Error ? e.message : 'cannot read image size'}`)),
+    );
+  });
+  if (!Number.isFinite(size.width) || !Number.isFinite(size.height) || size.width <= 0 || size.height <= 0) {
+    throw new Error('size-probe-failed: image has no dimensions');
+  }
+  const longSide = Math.max(size.width, size.height);
+  const actions =
+    longSide > APO_IMAGE_MAX_SIDE
+      ? [
+          {
+            resize: {
+              width: Math.round((size.width * APO_IMAGE_MAX_SIDE) / longSide),
+              height: Math.round((size.height * APO_IMAGE_MAX_SIDE) / longSide),
+            },
+          },
+        ]
+      : [];
+  const out = await manipulateAsync(uri, actions, {
+    compress: APO_IMAGE_JPEG_QUALITY,
+    format: SaveFormat.JPEG,
+    base64: true,
+  });
+  if (!out.base64) throw new Error('downscale-failed: манипулятор не вернул данные');
+  const dot = filename.lastIndexOf('.');
+  const base = dot > 0 ? filename.slice(0, dot) : filename;
+  return { base64: out.base64, filename: `${base}.jpg` };
+}
+
+/**
  * Photos and PDFs go to the backend: vision OCR for images, text layer
  * (+scan OCR) for PDFs. No text is ever invented locally.
  */
-async function ingestRemoteFile(name: string, uri: string, warnings: string[]): Promise<IngestResult> {
+async function ingestRemoteFile(
+  name: string,
+  uri: string,
+  warnings: string[],
+  isImage: boolean,
+): Promise<IngestResult> {
   if (!apiConfigured()) {
     warnings.push('no-server: для фото и PDF нужен backend (EXPO_PUBLIC_APO_API_URL)');
     return { text: '', questions: [], warnings };
   }
   let b64: string;
-  try {
-    b64 = await readUriBase64(uri);
-  } catch (e) {
-    // Real reason goes to the user — never a bare 'unreadable-file'.
-    warnings.push(e instanceof Error ? e.message : 'unreadable-file: не удалось прочитать файл с устройства');
+  let filename = name;
+  if (isImage) {
+    try {
+      const prepared = await prepareImageForUpload(uri, name);
+      b64 = prepared.base64;
+      filename = prepared.filename;
+    } catch (e) {
+      warnings.push(e instanceof Error ? e.message : 'downscale-failed: не удалось подготовить фото');
+      return { text: '', questions: [], warnings };
+    }
+  } else {
+    try {
+      b64 = await readUriBase64(uri);
+    } catch (e) {
+      // Real reason goes to the user — never a bare 'unreadable-file'.
+      warnings.push(e instanceof Error ? e.message : 'unreadable-file: не удалось прочитать файл с устройства');
+      return { text: '', questions: [], warnings };
+    }
+  }
+  if (b64.length > MAX_LOCAL_BYTES * 2) {
+    warnings.push('too-large: файл больше 15 МБ');
     return { text: '', questions: [], warnings };
   }
   try {
     const deviceId = await getDeviceId();
-    const r = await parseDocumentRemote(deviceId, null, name, b64);
+    const r = await parseDocumentRemote(deviceId, null, filename, b64);
     return {
       text: r.text,
       questions: r.questions.map((q) => ({ stem: q.stem, options: q.options.slice(0, 8), open: q.open })),
@@ -203,7 +274,7 @@ export async function ingestFile(file: ApoFileInput): Promise<IngestResult> {
   } else if (file.uri) {
     const ext = getExtension(file.name);
     if (VISION_EXTS.has(ext) || ext === 'pdf') {
-      return ingestRemoteFile(file.name, file.uri, warnings);
+      return ingestRemoteFile(file.name, file.uri, warnings, VISION_EXTS.has(ext));
     }
     if (IMAGE_EXTS.has(ext)) {
       warnings.push('unsupported-image: этот формат фото не поддерживается распознаванием (нужны JPG/PNG/WebP)');
@@ -216,7 +287,7 @@ export async function ingestFile(file: ApoFileInput): Promise<IngestResult> {
     else if (doc.kind === 'pages' && doc.pages) text = normalizeText(doc.pages.join('\n\n'));
     else if (apiConfigured() && file.uri) {
       // Local reader gave up (e.g. office formats) — try the server parser.
-      return ingestRemoteFile(file.name, file.uri, warnings);
+      return ingestRemoteFile(file.name, file.uri, warnings, false);
     } else {
       warnings.push(doc.note ?? 'binary-unsupported: формат без извлекаемого текста');
       return { text: '', questions: [], warnings };
