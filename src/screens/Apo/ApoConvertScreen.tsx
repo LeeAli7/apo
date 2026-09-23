@@ -63,7 +63,7 @@ export default function ApoConvertScreen({ navigation, route }: Props) {
       const warns: string[] = [];
       let all: { stem: string; options: { key: string; text: string }[] }[] = [];
       for (const f of files) {
-        const r = await ingestFile(f.name, '');
+        const r = await ingestFile(f.name, '', f.uri);
         warns.push(...r.warnings.map((w) => `${f.name}: ${w}`));
         all = all.concat(r.questions);
       }
