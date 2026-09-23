@@ -1,5 +1,5 @@
 // apo-server pipeline — the real path from input to answer:
-// cache -> decision engine -> 0.75 gate -> model fallback -> cache+quota.
+// cache -> decision engine -> 0.8 gate -> model fallback -> cache+quota.
 // Quota burns only on a real non-cached solution; outages never burn it.
 
 import type { ServerEnv } from './env';
@@ -17,7 +17,7 @@ import { docxToText } from './docx';
 import { pdfExtract } from './pdf';
 import { splitQuestions } from './split';
 
-export const ACCURACY_GATE = 0.75;
+export const ACCURACY_GATE = 0.8;
 
 export interface SolveOutput {
   choiceIndex: number;
@@ -93,6 +93,18 @@ export async function solveQuestion(
     } catch {
       // Fallback failed — keep the primary engine answer with its flag.
     }
+  }
+  // Cache ONLY real successes: valid index, full distribution, finite
+  // confidence. Anything else throws above and never lands in cache,
+  // so a retry after an error always goes live.
+  if (
+    !Number.isInteger(finalChoice) ||
+    finalChoice < 0 ||
+    finalChoice >= cleanOpts.length ||
+    finalProbs.length !== cleanOpts.length ||
+    !Number.isFinite(finalConf)
+  ) {
+    throw new ProviderError('bad-provider-response', 'Decision engine returned an unusable shape', 502);
   }
   db.putDecision(key, {
     choiceIndex: finalChoice,

@@ -31,10 +31,13 @@ export {
 } from './ingest';
 export {
   solveTest,
+  solveBatch,
   buildChoicePayload,
   APO_ACCURACY_THRESHOLD,
+  APO_BATCH_MAX,
   type SolveInput,
   type SolveResult,
+  type BatchItemResult,
   type ChoicePayload,
 } from './solver';
 export { explainText, buildExplainPrompt, type ExplainResult } from './explain';

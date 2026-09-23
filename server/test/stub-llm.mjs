@@ -3,6 +3,7 @@
 import * as http from 'node:http';
 
 export const stubHits = { deepseek: 0, jev: 0 };
+const failOnceSeen = new Set();
 
 function send(res, status, body) {
   res.writeHead(status, { 'Content-Type': 'application/json' });
@@ -50,6 +51,13 @@ export function startStub(port) {
         }
         if (req.url === '/v1/systemone') {
           stubHits.jev += 1;
+          const state = body.state ?? {};
+          const qtext = typeof state.question === 'string' ? state.question : '';
+          if (qtext.includes('FAIL-ONCE') && !failOnceSeen.has(qtext)) {
+            failOnceSeen.add(qtext);
+            send(res, 200, { answers: {} });
+            return;
+          }
           const questions = body.questions ?? {};
           const first = questions[Object.keys(questions)[0]] ?? {};
           const criteria = first.criteria ?? {};

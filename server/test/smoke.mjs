@@ -199,6 +199,15 @@ async function main() {
 
     const empty = await pd('empty.txt', '');
     eq('doc empty honest', [empty.status, empty.data.questions.length, empty.data.warnings.length > 0], [200, 0, true]);
+
+    const jevBefore = stubHits.jev;
+    const fail1 = await post(base, '/v1/solve', { deviceId: 'smoke-fail', stem: 'FAIL-ONCE?', options: ['A1', 'B2'] });
+    eq('failure not cached (502)', [fail1.status, fail1.data.error], [502, 'bad-provider-response']);
+    const fail2 = await post(base, '/v1/solve', { deviceId: 'smoke-fail', stem: 'FAIL-ONCE?', options: ['A1', 'B2'] });
+    eq('retry goes live and succeeds', [fail2.status, fail2.data.choiceIndex >= 0], [200, true]);
+    eq('retry hit provider again', stubHits.jev - jevBefore, 2);
+    const qf = await (await fetch(`${base}/v1/quota?deviceId=smoke-fail`)).json();
+    eq('failure burned nothing, success burned one', qf.remaining, 1);
   } finally {
     srv.kill();
     stub.close();

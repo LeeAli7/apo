@@ -1,7 +1,7 @@
 // Apo — типы и контракт с движком.
 // NATIVE OWNER (Ares): заменить мок-реализации в apoEngine.ts на реальные
 // вызовы движка — сигнатуры и ключи ниже НЕ менять, UI уже закодирован под них.
-export const APO_CONFIDENCE_THRESHOLD = 0.75;
+export const APO_CONFIDENCE_THRESHOLD = 0.8;
 
 export const APO_KEYS = {
   history: 'apo_history_v1',
