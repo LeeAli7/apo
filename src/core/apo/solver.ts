@@ -5,7 +5,7 @@
 import { apiConfigured, solveRemote, ApoApiError } from './api';
 import { getDeviceId } from './device';
 
-export const APO_ACCURACY_THRESHOLD = 0.75;
+export const APO_ACCURACY_THRESHOLD = 0.8;
 
 export interface SolveInput {
   stem: string;
@@ -43,6 +43,41 @@ export async function solveTest(input: SolveInput): Promise<SolveResult> {
     provider: r.provider,
     cacheHit: r.cached,
   };
+}
+
+export interface BatchItemResult {
+  stem: string;
+  options: string[];
+  ok: boolean;
+  result?: SolveResult;
+  /** Error code when ok === false (timeout, quota-exceeded, ...). */
+  error?: string;
+}
+
+export const APO_BATCH_MAX = 20;
+
+/**
+ * Solve a whole file sequentially: every question goes live through
+ * solveTest (own 30s timeout and quota burn per solved item), one bad
+ * item never stops the rest. No batch endpoint needed — per-item calls
+ * keep timeouts and quota accounting exact.
+ */
+export async function solveBatch(items: SolveInput[]): Promise<BatchItemResult[]> {
+  const list = items.slice(0, APO_BATCH_MAX);
+  const out: BatchItemResult[] = [];
+  for (const input of list) {
+    try {
+      out.push({ stem: input.stem, options: input.options, ok: true, result: await solveTest(input) });
+    } catch (e) {
+      out.push({
+        stem: input.stem,
+        options: input.options,
+        ok: false,
+        error: e instanceof ApoApiError ? e.code : 'request-failed',
+      });
+    }
+  }
+  return out;
 }
 
 export interface ChoicePayload {
