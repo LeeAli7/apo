@@ -9,6 +9,7 @@ import { useApoUI } from './apoUI';
 import { APO_CONFIDENCE_THRESHOLD } from '../../apo/apoTypes';
 import { explainText } from '../../apo/apoEngine';
 import { pushHistory } from '../../core/apo';
+import type { BatchResult } from './ApoSolvingScreen';
 
 declare const require: any;
 function loadClipboard(): any | null {
@@ -24,58 +25,63 @@ interface Props {
   route: any;
 }
 
+const THRESH_PCT = Math.round(APO_CONFIDENCE_THRESHOLD * 100);
+
 export default function ApoResultScreen({ navigation, route }: Props) {
   const { theme } = useTheme();
   const { openDrawer } = useApoUI();
   const insets = useSafeAreaInsets();
   const s = styles(theme, insets);
   const p = route?.params ?? {};
-  const question: string = p.question ?? 'Вопрос';
-  const options: string[] = p.options ?? [];
-  const answerIndex: number = p.answerIndex ?? 0;
-  const confidence: number[] = p.confidence ?? [];
-  const ms: number = p.ms ?? 0;
-  const lowAccuracy: boolean = p.lowAccuracy ?? false;
-  const queue: { question: string; options: string[] }[] = p.queue ?? [];
-  const answer = options[answerIndex] ?? '—';
-  const top = confidence[answerIndex] ?? 0;
-  const [explain, setExplain] = useState<string | null>(null);
-  const [explainBusy, setExplainBusy] = useState(false);
+  // Батч: все решённые вопросы; одиночный вызов — батч из одного.
+  const batch: BatchResult[] = p.batch ?? [{
+    question: p.question ?? 'Вопрос',
+    options: p.options ?? [],
+    answerIndex: p.answerIndex ?? 0,
+    confidence: p.confidence ?? [],
+    ms: p.ms ?? 0,
+    lowAccuracy: p.lowAccuracy ?? false,
+    refined: false,
+  }];
+  const [sel, setSel] = useState(0);
+  const cur = batch[Math.min(sel, batch.length - 1)];
+  const answer = cur.options[cur.answerIndex] ?? '—';
+  const top = cur.answerIndex >= 0 ? cur.confidence[cur.answerIndex] ?? 0 : 0;
+  const [explains, setExplains] = useState<Record<number, string>>({});
+  const [busyIdx, setBusyIdx] = useState<number | null>(null);
 
   useEffect(() => {
-    if (p.question) {
-      pushHistory({ ts: Date.now(), stem: question, choice: answer, confidence: top, lowAccuracy }).catch(() => {});
-    }
+    batch.forEach((b, i) => {
+      if (b.answerIndex >= 0) {
+        const t = b.confidence[b.answerIndex] ?? 0;
+        const a = b.options[b.answerIndex] ?? '—';
+        pushHistory({ ts: Date.now() + i, stem: b.question, choice: a, confidence: t, lowAccuracy: b.lowAccuracy }).catch(() => {});
+      }
+    });
   }, []);
 
-  const nextInQueue = queue[0];
-
-  const onNext = () => {
-    if (nextInQueue) {
-      navigation.replace('ApoSolving', {
-        question: nextInQueue.question,
-        options: nextInQueue.options,
-        queue: queue.slice(1),
-      });
-    } else {
-      navigation.navigate('ApoHome');
-    }
-  };
-
-  const onExplain = async () => {
-    setExplainBusy(true);
+  const onExplain = async (idx: number) => {
+    const b = batch[idx];
+    const a = b.options[b.answerIndex] ?? '—';
+    setBusyIdx(idx);
     try {
-      const t = await explainText(question, answer);
-      setExplain(t);
+      const t = await explainText(b.question, a);
+      setExplains((prev) => ({ ...prev, [idx]: t }));
     } finally {
-      setExplainBusy(false);
+      setBusyIdx(null);
     }
   };
 
   const onCopy = async () => {
     const C = loadClipboard() as any;
-    if (C) await C.setStringAsync(`${question}\nОтвет: ${answer}`);
-    Alert.alert('Скопировано', 'Ответ в буфере обмена');
+    if (C) {
+      const text = batch.map((b, i) => {
+        const a = b.answerIndex >= 0 ? b.options[b.answerIndex] : '—';
+        return `${i + 1}. ${b.question}\nОтвет: ${a}`;
+      }).join('\n\n');
+      await C.setStringAsync(text);
+    }
+    Alert.alert('Скопировано', batch.length > 1 ? `Все ответы (${batch.length}) в буфере` : 'Ответ в буфере обмена');
   };
 
   return (
@@ -90,55 +96,87 @@ export default function ApoResultScreen({ navigation, route }: Props) {
         </Pressable>
       </View>
 
+      <Text style={s.title}>
+        {batch.length > 1 ? `Ответы · ${batch.length}` : 'Ответ'}
+      </Text>
+
+      {batch.length > 1 && (
+        <ScrollView horizontal showsHorizontalScrollIndicator={false} style={s.tabs}>
+          {batch.map((b, i) => {
+            const a = b.answerIndex >= 0 ? b.options[b.answerIndex] : '—';
+            return (
+              <Pressable key={i} style={[s.tab, i === sel && s.tabOn]} onPress={() => setSel(i)}>
+                <Text style={[s.tabNum, i === sel && s.tabNumOn]}>{i + 1}</Text>
+                <Text style={[s.tabAns, i === sel && s.tabAnsOn]} numberOfLines={1}>
+                  {a}{b.refined ? ' *' : ''}{b.lowAccuracy ? ' !' : ''}
+                </Text>
+              </Pressable>
+            );
+          })}
+        </ScrollView>
+      )}
+
       <View style={s.ans}>
-        <Text style={s.ansLab}>Ответ · {(ms / 1000).toFixed(1)} c</Text>
+        <Text style={s.ansLab}>Ответ · {(cur.ms / 1000).toFixed(1)} c</Text>
+        <Text style={s.ansStem} numberOfLines={3}>{cur.question}</Text>
         <Text style={s.ansBig}>{answer}</Text>
-        {options.map((o, i) => (
+        {cur.refined && (
+          <View style={s.refined}>
+            <Ionicons name="sparkles" size={14} color="#B9C9EE" />
+            <Text style={s.refinedText}>Ответ уточнён второй моделью</Text>
+          </View>
+        )}
+        {cur.error && (
+          <Text style={s.errText}>Не решился — попробуйте ещё раз</Text>
+        )}
+        {cur.options.map((o, i) => (
           <View key={i} style={s.prob}>
             <Text style={s.probText}>{o}</Text>
-            <Text style={s.probVal}>{Math.round((confidence[i] ?? 0) * 100)}%</Text>
+            <Text style={s.probVal}>{Math.round((cur.confidence[i] ?? 0) * 100)}%</Text>
           </View>
         ))}
       </View>
 
-      {lowAccuracy && (
+      {cur.lowAccuracy && cur.answerIndex >= 0 && (
         <View style={s.warn}>
           <Ionicons name="warning" size={18} color="#FCD34D" />
           <View style={s.warnTextWrap}>
-            <Text style={s.warnTitle}>Точность ниже 75% — проверьте ответ</Text>
+            <Text style={s.warnTitle}>Точность ниже {THRESH_PCT}% — проверьте ответ</Text>
             <Text style={s.warnSub}>
-              Уверенность {Math.round(top * 100)}%, порог {(APO_CONFIDENCE_THRESHOLD * 100).toFixed(0)}%.
+              Уверенность {Math.round(top * 100)}%, порог {THRESH_PCT}%.
               Разбор — по кнопке ниже.
             </Text>
           </View>
         </View>
       )}
 
-      <Pressable style={s.explainBtn} onPress={onExplain} disabled={explainBusy}>
-        {explainBusy ? (
-          <ActivityIndicator color="#B9C9EE" />
-        ) : (
-          <>
-            <Ionicons name="document-text" size={18} color="#B9C9EE" />
-            <Text style={s.explainText}>Объяснить подробнее</Text>
-          </>
-        )}
-      </Pressable>
+      {cur.answerIndex >= 0 && (
+        <Pressable style={s.explainBtn} onPress={() => onExplain(sel)} disabled={busyIdx === sel}>
+          {busyIdx === sel ? (
+            <ActivityIndicator color="#B9C9EE" />
+          ) : (
+            <>
+              <Ionicons name="document-text" size={18} color="#B9C9EE" />
+              <Text style={s.explainText}>Объяснить подробнее</Text>
+            </>
+          )}
+        </Pressable>
+      )}
 
-      {explain && (
+      {explains[sel] && (
         <View style={s.card}>
-          <Text style={s.expl}>{explain}</Text>
+          <Text style={s.expl}>{explains[sel]}</Text>
         </View>
       )}
 
       <View style={s.actions}>
         <Pressable style={s.chip} onPress={onCopy}>
           <Ionicons name="copy-outline" size={16} color="#D5DCE8" />
-          <Text style={s.chipText}>Копировать</Text>
+          <Text style={s.chipText}>Копировать{batch.length > 1 ? ' всё' : ''}</Text>
         </Pressable>
-        <Pressable style={s.chip} onPress={onNext}>
+        <Pressable style={s.chip} onPress={() => navigation.navigate('ApoHome')}>
           <Ionicons name="add" size={16} color="#D5DCE8" />
-          <Text style={s.chipText}>{nextInQueue ? `Дальше (${queue.length})` : 'Следующий'}</Text>
+          <Text style={s.chipText}>Следующий</Text>
         </Pressable>
       </View>
     </ScrollView>
@@ -154,9 +192,20 @@ function styles(theme: any, insets: any) {
     backText: { color: '#8A94A6', fontSize: 13, fontWeight: '600' },
     iconBtn: { width: 38, height: 38, borderRadius: 12, backgroundColor: '#131A26', alignItems: 'center', justifyContent: 'center' },
     title: { fontSize: 21, fontWeight: '800', color: '#F2F5F9', marginTop: 10 },
+    tabs: { marginTop: 10 },
+    tab: { width: 120, backgroundColor: '#131A26', borderRadius: 12, padding: 10, marginRight: 8, borderWidth: 1.5, borderColor: 'transparent' },
+    tabOn: { borderColor: '#4F7CFF' },
+    tabNum: { fontSize: 16, fontWeight: '800', color: '#8A94A6' },
+    tabNumOn: { color: '#FFF' },
+    tabAns: { fontSize: 12, color: '#8A94A6', marginTop: 2 },
+    tabAnsOn: { color: '#D5DCE8' },
     ans: { borderRadius: 16, padding: 16, marginTop: 12, backgroundColor: 'rgba(52,211,153,.08)', borderWidth: 1.5, borderColor: '#34D399' },
     ansLab: { fontSize: 11, fontWeight: '800', letterSpacing: 1, color: '#34D399', textTransform: 'uppercase' },
+    ansStem: { fontSize: 13.5, color: '#B9C3D4', marginTop: 6, lineHeight: 19 },
     ansBig: { fontSize: 18, fontWeight: '800', color: '#F2F5F9', marginTop: 4 },
+    refined: { flexDirection: 'row', alignItems: 'center', gap: 6, marginTop: 8, backgroundColor: 'rgba(79,124,255,.12)', borderRadius: 10, padding: 8 },
+    refinedText: { fontSize: 12.5, color: '#B9C9EE', fontWeight: '600' },
+    errText: { fontSize: 13, color: '#FCA5A5', marginTop: 8 },
     prob: { flexDirection: 'row', justifyContent: 'space-between', paddingVertical: 8, borderBottomWidth: 1, borderBottomColor: '#161D2A' },
     probText: { fontSize: 13.5, color: '#B9C3D4', flex: 1 },
     probVal: { fontSize: 13.5, fontWeight: '800', color: '#F2F5F9' },

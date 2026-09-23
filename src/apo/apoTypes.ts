@@ -1,7 +1,7 @@
 // Apo — типы и контракт с движком.
-// NATIVE OWNER (Ares): заменить мок-реализации в apoEngine.ts на реальные
-// вызовы движка — сигнатуры и ключи ниже НЕ менять, UI уже закодирован под них.
-export const APO_CONFIDENCE_THRESHOLD = 0.75;
+// Порог точности 0.80: ниже — автозапуск второй модели и пометка уточнения.
+// NATIVE OWNER (Ares): движок держит APO_ACCURACY_THRESHOLD синхронно.
+export const APO_CONFIDENCE_THRESHOLD = 0.80;
 
 export const APO_KEYS = {
   history: 'apo_history_v1',
@@ -32,6 +32,8 @@ export interface ApoSolveResult {
   confidence: number[];
   ms: number;
   lowAccuracy: boolean;
+  /** Ответ уточнён второй моделью (авто при точности ниже порога). */
+  refined?: boolean;
 }
 
 export type ApoSubPlan = 'free' | 'base' | 'unlimited';
