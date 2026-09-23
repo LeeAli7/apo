@@ -154,6 +154,35 @@ export async function jevChoice(env: ServerEnv, stem: string, options: string[])
   return { choiceIndex, probabilities: probabilities.map(round3), confidence: round3(confidence) };
 }
 
+/** Photo/scan OCR via the vision-capable text model. Returns raw text. */
+export async function deepseekVisionOcr(
+  env: ServerEnv,
+  imageBase64: string,
+  mime: string,
+): Promise<string> {
+  if (!env.deepseekApiKey) throw new ProviderError('no-provider-key', 'DEEPSEEK_API_KEY is not set', 503);
+  const data = (await postJson(`${env.deepseekBaseUrl}/chat/completions`, env.deepseekApiKey, {
+    model: env.deepseekVisionModel,
+    temperature: 0,
+    max_tokens: 2000,
+    messages: [
+      {
+        role: 'user',
+        content: [
+          {
+            type: 'text',
+            text: 'Распознай весь печатный текст на изображении дословно, сохрани порядок строк и маркеры вариантов (A, B, C… / 1, 2, 3…). Верни только распознанный текст, без комментариев.',
+          },
+          { type: 'image_url', image_url: { url: `data:${mime};base64,${imageBase64}` } },
+        ],
+      },
+    ],
+  })) as { choices?: { message?: { content?: string } }[] };
+  const text = (data.choices?.[0]?.message?.content ?? '').trim();
+  if (!text) throw new ProviderError('bad-provider-response', 'Vision model returned empty text');
+  return text.slice(0, 8000);
+}
+
 /** Short step-by-step explanation (RU) via the text model. */
 export async function deepseekExplain(env: ServerEnv, stem: string, answer: string): Promise<string> {
   if (!env.deepseekApiKey) throw new ProviderError('no-provider-key', 'DEEPSEEK_API_KEY is not set', 503);

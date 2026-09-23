@@ -6,9 +6,9 @@ import { ApoDb } from './db';
 import { resolveIdentity, verifyGoogleIdToken } from './auth';
 import { ProviderError } from './providers';
 import { verifyPlayPurchase } from './billing';
-import { solveQuestion, structureText, explainAnswer, today } from './pipeline';
+import { solveQuestion, structureText, explainAnswer, parseDocument, today } from './pipeline';
 
-const MAX_BODY = 5 * 1024 * 1024;
+const MAX_BODY = 20 * 1024 * 1024;
 
 function send(res: http.ServerResponse, status: number, body: unknown): void {
   const text = JSON.stringify(body);
@@ -23,7 +23,7 @@ function readBody(req: http.IncomingMessage): Promise<string> {
     req.on('data', (c: Buffer) => {
       size += c.length;
       if (size > MAX_BODY) {
-        reject(new ProviderError('body-too-large', 'Request body exceeds 5 MB', 413));
+        reject(new ProviderError('body-too-large', 'Request body exceeds 20 MB', 413));
         req.destroy();
         return;
       }
@@ -106,6 +106,14 @@ export function createServer(): http.Server {
         const ident = await resolveIdentity(str(body.deviceId), str(body.idToken) || null, env.googleClientId);
         void ident;
         const out = await explainAnswer(db, env, str(body.stem), str(body.answer));
+        send(res, 200, out);
+        return;
+      }
+
+      if (path === '/v1/parse-document') {
+        const ident = await resolveIdentity(str(body.deviceId), str(body.idToken) || null, env.googleClientId);
+        void ident;
+        const out = await parseDocument(env, str(body.filename) || 'file.bin', str(body.dataBase64));
         send(res, 200, out);
         return;
       }

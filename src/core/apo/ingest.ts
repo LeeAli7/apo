@@ -4,7 +4,8 @@
 
 import { loadReadable } from '../../utils/documentLoader';
 import { getExtension } from '../../utils/fileTypes';
-import { apiConfigured, structureRemote, ApoApiError } from './api';
+import * as FileSystem from 'expo-file-system';
+import { apiConfigured, structureRemote, parseDocumentRemote, ApoApiError } from './api';
 import { getDeviceId } from './device';
 
 export interface ApoFileInput {
@@ -27,6 +28,65 @@ export interface IngestResult {
 }
 
 const IMAGE_EXTS = new Set(['jpg', 'jpeg', 'png', 'webp', 'heic', 'heif', 'bmp', 'gif']);
+// Formats the vision model accepts directly.
+const VISION_EXTS = new Set(['jpg', 'jpeg', 'png', 'webp']);
+const MAX_LOCAL_BYTES = 15 * 1024 * 1024;
+
+/** Read any local file as base64 (legacy API first, File/Blob fallback). */
+async function readUriBase64(uri: string): Promise<string> {
+  const FS = FileSystem as unknown as {
+    readAsStringAsync?: (uri: string, options?: { encoding?: string }) => Promise<string>;
+    File?: new (uri: string) => { arrayBuffer: () => Promise<ArrayBuffer> };
+  };
+  if (typeof FS.readAsStringAsync === 'function') {
+    return FS.readAsStringAsync(uri, { encoding: 'base64' });
+  }
+  if (typeof FS.File === 'function') {
+    const buf = await new FS.File(uri).arrayBuffer();
+    const bytes = new Uint8Array(buf);
+    let bin = '';
+    for (let i = 0; i < bytes.length; i += 0x2000) {
+      bin += String.fromCharCode(...bytes.subarray(i, i + 0x2000));
+    }
+    return btoa(bin);
+  }
+  throw new Error('no-file-reader');
+}
+
+/**
+ * Photos and PDFs go to the backend: vision OCR for images, text layer
+ * (+scan OCR) for PDFs. No text is ever invented locally.
+ */
+async function ingestRemoteFile(name: string, uri: string, warnings: string[]): Promise<IngestResult> {
+  if (!apiConfigured()) {
+    warnings.push('no-server: для фото и PDF нужен backend (EXPO_PUBLIC_APO_API_URL)');
+    return { text: '', questions: [], warnings };
+  }
+  let b64: string;
+  try {
+    b64 = await readUriBase64(uri);
+  } catch {
+    warnings.push('unreadable-file: не удалось прочитать файл с устройства');
+    return { text: '', questions: [], warnings };
+  }
+  if (b64.length > MAX_LOCAL_BYTES * 2) {
+    warnings.push('too-large: файл больше 15 МБ');
+    return { text: '', questions: [], warnings };
+  }
+  try {
+    const deviceId = await getDeviceId();
+    const r = await parseDocumentRemote(deviceId, null, name, b64);
+    return {
+      text: r.text,
+      questions: r.questions.map((q) => ({ stem: q.stem, options: q.options.slice(0, 8), open: q.open })),
+      warnings: [...warnings, ...r.warnings],
+    };
+  } catch (e) {
+    const code = e instanceof ApoApiError ? e.code : 'request-failed';
+    warnings.push(`${code}: серверный разбор не удался`);
+    return { text: '', questions: [], warnings };
+  }
+}
 
 const Q_START =
   /^(?:#{1,3}\s+|\d{1,3}[.)]\s*\S|вопрос\s*\d*\s*[:.)]?\s*\S)/i;
@@ -130,16 +190,11 @@ export async function ingestFile(file: ApoFileInput): Promise<IngestResult> {
     text = normalizeText(file.text);
   } else if (file.uri) {
     const ext = getExtension(file.name);
-    if (IMAGE_EXTS.has(ext)) {
-      warnings.push(
-        'ocr-needed: фото без копируемого текста — в MVP распознавание камеры вне скоупа, вставь текст вручную',
-      );
-      return { text: '', questions: [], warnings };
+    if (VISION_EXTS.has(ext) || ext === 'pdf') {
+      return ingestRemoteFile(file.name, file.uri, warnings);
     }
-    if (ext === 'pdf') {
-      warnings.push(
-        'pdf-text-pending: извлечение текстового слоя PDF в MVP читает движок Reader — сюда передай текст напрямую',
-      );
+    if (IMAGE_EXTS.has(ext)) {
+      warnings.push('unsupported-image: этот формат фото не поддерживается распознаванием (нужны JPG/PNG/WebP)');
       return { text: '', questions: [], warnings };
     }
     const doc = await loadReadable(file.uri, ext);
@@ -147,7 +202,10 @@ export async function ingestFile(file: ApoFileInput): Promise<IngestResult> {
     else if (doc.kind === 'sheet' && doc.sheets) text = normalizeText(sheetsToText(doc.sheets));
     else if (doc.kind === 'rich' && doc.html) text = stripHtml(doc.html);
     else if (doc.kind === 'pages' && doc.pages) text = normalizeText(doc.pages.join('\n\n'));
-    else {
+    else if (apiConfigured() && file.uri) {
+      // Local reader gave up (e.g. office formats) — try the server parser.
+      return ingestRemoteFile(file.name, file.uri, warnings);
+    } else {
       warnings.push(doc.note ?? 'binary-unsupported: формат без извлекаемого текста');
       return { text: '', questions: [], warnings };
     }

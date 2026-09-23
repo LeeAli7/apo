@@ -74,6 +74,18 @@ export interface RemoteQuota {
   freeDaily: number;
 }
 
+export interface RemoteParsedQuestion {
+  stem: string;
+  options: string[];
+  open: boolean;
+}
+
+export interface RemoteParsedDocument {
+  text: string;
+  questions: RemoteParsedQuestion[];
+  warnings: string[];
+}
+
 export function solveRemote(deviceId: string, idToken: string | null, stem: string, options: string[]): Promise<RemoteSolve> {
   return apiFetch<RemoteSolve>('/v1/solve', { deviceId, idToken, stem, options });
 }
@@ -88,4 +100,13 @@ export function explainRemote(deviceId: string, idToken: string | null, stem: st
 
 export function quotaRemote(deviceId: string, idToken: string | null): Promise<RemoteQuota> {
   return apiFetch<RemoteQuota>('/v1/quota', { deviceId, idToken });
+}
+
+export function parseDocumentRemote(
+  deviceId: string,
+  idToken: string | null,
+  filename: string,
+  dataBase64: string,
+): Promise<RemoteParsedDocument> {
+  return apiFetch<RemoteParsedDocument>('/v1/parse-document', { deviceId, idToken, filename, dataBase64 });
 }

@@ -11,6 +11,7 @@ export interface ServerEnv {
   deepseekApiKey: string;
   deepseekBaseUrl: string;
   deepseekModel: string;
+  deepseekVisionModel: string;
   jevApiKey: string;
   jevBaseUrl: string;
   jevModel: string;
@@ -59,6 +60,7 @@ export function loadEnv(): ServerEnv {
     deepseekApiKey: process.env.DEEPSEEK_API_KEY ?? '',
     deepseekBaseUrl: (process.env.DEEPSEEK_BASE_URL ?? 'https://api.deepseek.com').replace(/\/+$/, ''),
     deepseekModel: process.env.DEEPSEEK_MODEL ?? 'deepseek-chat',
+    deepseekVisionModel: process.env.DEEPSEEK_VISION_MODEL ?? 'deepseek-flash',
     jevApiKey: process.env.TYPESAFE_API_KEY ?? '',
     jevBaseUrl: (process.env.JEV_BASE_URL ?? 'https://api.typesafe.ai').replace(/\/+$/, ''),
     jevModel: process.env.JEV_MODEL ?? 'jev-1.13.0',
