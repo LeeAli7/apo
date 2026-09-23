@@ -4,7 +4,7 @@
 
 import { loadReadable } from '../../utils/documentLoader';
 import { getExtension } from '../../utils/fileTypes';
-import * as FileSystem from 'expo-file-system';
+import { File } from 'expo-file-system';
 import { apiConfigured, structureRemote, parseDocumentRemote, ApoApiError } from './api';
 import { getDeviceId } from './device';
 
@@ -32,25 +32,40 @@ const IMAGE_EXTS = new Set(['jpg', 'jpeg', 'png', 'webp', 'heic', 'heif', 'bmp',
 const VISION_EXTS = new Set(['jpg', 'jpeg', 'png', 'webp']);
 const MAX_LOCAL_BYTES = 15 * 1024 * 1024;
 
-/** Read any local file as base64 (legacy API first, File/Blob fallback). */
-async function readUriBase64(uri: string): Promise<string> {
-  const FS = FileSystem as unknown as {
-    readAsStringAsync?: (uri: string, options?: { encoding?: string }) => Promise<string>;
-    File?: new (uri: string) => { arrayBuffer: () => Promise<ArrayBuffer> };
-  };
-  if (typeof FS.readAsStringAsync === 'function') {
-    return FS.readAsStringAsync(uri, { encoding: 'base64' });
+/** Read any local file as base64 via the SDK57 File API.
+ * NOTE: legacy readAsStringAsync/getInfoAsync from 'expo-file-system' THROW
+ * at runtime in SDK57 (deprecated shims) — do not use them.
+ * Exported as a test seam (device FS can't run in Node). */
+export async function readUriBase64(uri: string): Promise<string> {
+  let file: InstanceType<typeof File>;
+  try {
+    file = new File(uri);
+  } catch (e) {
+    throw new Error(`bad-uri: ${e instanceof Error ? e.message : 'invalid file uri'}`);
   }
-  if (typeof FS.File === 'function') {
-    const buf = await new FS.File(uri).arrayBuffer();
-    const bytes = new Uint8Array(buf);
-    let bin = '';
-    for (let i = 0; i < bytes.length; i += 0x2000) {
-      bin += String.fromCharCode(...bytes.subarray(i, i + 0x2000));
-    }
+  const knownSize = typeof file.size === 'number' ? file.size : 0;
+  if (knownSize > MAX_LOCAL_BYTES) {
+    throw new Error(`too-large: файл ${(knownSize / 1048576).toFixed(1)} МБ больше 15 МБ`);
+  }
+  let bytes: Uint8Array;
+  try {
+    bytes = await file.bytes();
+  } catch (e) {
+    throw new Error(`read-failed: ${e instanceof Error ? e.message : 'cannot read file'}`);
+  }
+  if (bytes.length > MAX_LOCAL_BYTES) {
+    throw new Error(`too-large: файл ${(bytes.length / 1048576).toFixed(1)} МБ больше 15 МБ`);
+  }
+  if (bytes.length === 0) throw new Error('empty-file: файл пустой (0 байт)');
+  let bin = '';
+  for (let i = 0; i < bytes.length; i += 0x2000) {
+    bin += String.fromCharCode(...bytes.subarray(i, i + 0x2000));
+  }
+  try {
     return btoa(bin);
+  } catch {
+    throw new Error('base64-failed: не удалось закодировать файл');
   }
-  throw new Error('no-file-reader');
 }
 
 /**
@@ -65,12 +80,9 @@ async function ingestRemoteFile(name: string, uri: string, warnings: string[]): 
   let b64: string;
   try {
     b64 = await readUriBase64(uri);
-  } catch {
-    warnings.push('unreadable-file: не удалось прочитать файл с устройства');
-    return { text: '', questions: [], warnings };
-  }
-  if (b64.length > MAX_LOCAL_BYTES * 2) {
-    warnings.push('too-large: файл больше 15 МБ');
+  } catch (e) {
+    // Real reason goes to the user — never a bare 'unreadable-file'.
+    warnings.push(e instanceof Error ? e.message : 'unreadable-file: не удалось прочитать файл с устройства');
     return { text: '', questions: [], warnings };
   }
   try {
