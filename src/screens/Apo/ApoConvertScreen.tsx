@@ -1,6 +1,6 @@
-import React, { useMemo, useState } from 'react';
+import React, { useState } from 'react';
 import {
-  View, Text, Pressable, StyleSheet, ScrollView, TextInput, Alert,
+  View, Text, Pressable, StyleSheet, ScrollView, Alert,
   ActivityIndicator,
 } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
@@ -8,7 +8,7 @@ import { Ionicons } from '@expo/vector-icons';
 import * as DocumentPicker from 'expo-document-picker';
 import { useTheme } from './apoTheme';
 import { useApoUI } from './apoUI';
-import { ingestFile, parseAllQuestions } from '../../apo/apoEngine';
+import { ingestFile } from '../../apo/apoEngine';
 
 interface Props {
   navigation: any;
@@ -22,19 +22,8 @@ export default function ApoConvertScreen({ navigation, route }: Props) {
   const s = styles(theme, insets);
   const incoming = (route?.params?.files ?? []) as { name: string; uri: string }[];
   const [files, setFiles] = useState(incoming);
-  const [text, setText] = useState('');
-  const [showText, setShowText] = useState(route?.params?.tab === 'text');
   const [busy, setBusy] = useState(false);
   const [warnings, setWarnings] = useState<string[]>([]);
-
-  // Живое превью: распознанные вопрос + варианты — сразу карточка и кнопка.
-  const preview = useMemo(() => {
-    if (!text.trim()) return null;
-    const list = parseAllQuestions(text);
-    const first = list[0];
-    if (!first || !first.stem || first.options.length < 2) return null;
-    return { q: first, total: list.length };
-  }, [text]);
 
   const pickDoc = async () => {
     try {
@@ -66,7 +55,7 @@ export default function ApoConvertScreen({ navigation, route }: Props) {
 
   const startFromFiles = async () => {
     if (files.length === 0) {
-      Alert.alert('Нет файлов', 'Добавьте документ или вставьте текст');
+      Alert.alert('Нет файлов', 'Добавьте PDF, Word или изображение');
       return;
     }
     setBusy(true);
@@ -79,8 +68,8 @@ export default function ApoConvertScreen({ navigation, route }: Props) {
         all = all.concat(r.questions);
       }
       if (all.length === 0) {
-        setWarnings(warns.length ? warns : ['Из файлов текст не извлекся — вставьте текст вручную']);
-        setShowText(true);
+        setWarnings(warns.length ? warns : ['Из файлов текст не извлекся — парсер вложений на стороне движка']);
+        setBusy(false);
         return;
       }
       setWarnings(warns);
@@ -134,43 +123,10 @@ export default function ApoConvertScreen({ navigation, route }: Props) {
         </Pressable>
       )}
 
-      {preview && (
-        <View style={s.found}>
-          <View style={s.foundHead}>
-            <Ionicons name="checkmark-circle" size={20} color="#34D399" />
-            <Text style={s.foundTitle}>
-              Найден вопрос + {preview.q.options.length} варианта{preview.total > 1 ? ` (ещё ${preview.total - 1})` : ''}
-            </Text>
-          </View>
-          <Text style={s.foundStem} numberOfLines={3}>{preview.q.stem}</Text>
-          {preview.q.options.slice(0, 4).map((o) => (
-            <Text key={o.key} style={s.foundOpt} numberOfLines={1}>{o.key}. {o.text}</Text>
-          ))}
-          <Pressable style={s.cta} onPress={() => solveQuestions(parseAllQuestions(text))}>
-            <Text style={s.ctaText}>Решить</Text>
-            <Ionicons name="arrow-forward" size={18} color="#FFF" />
-          </Pressable>
-        </View>
-      )}
-
-      <Pressable style={s.fallback} onPress={() => setShowText((v) => !v)}>
-        <Ionicons name={showText ? 'chevron-up' : 'text'} size={16} color="#8A94A6" />
-        <Text style={s.fallbackText}>
-          {showText ? 'Скрыть ручной ввод' : 'Не распозналось? Вставить текст вручную'}
-        </Text>
+      <Pressable style={s.manual} onPress={() => navigation.navigate('ApoManual')}>
+        <Ionicons name="create-outline" size={18} color={theme.accent} />
+        <Text style={s.manualText}>Ввести вручную — вопрос и варианты по полям</Text>
       </Pressable>
-
-      {showText && (
-        <TextInput
-          style={s.input}
-          multiline
-          autoFocus={route?.params?.tab === 'text'}
-          placeholder="Вопрос и варианты — разложим сами"
-          placeholderTextColor="#5B6678"
-          value={text}
-          onChangeText={setText}
-        />
-      )}
 
       {warnings.map((w, i) => (
         <View key={i} style={s.warn}>
@@ -199,14 +155,8 @@ function styles(theme: any, insets: any) {
     addText: { fontSize: 13.5, fontWeight: '600', color: theme.accent },
     cta: { flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 8, borderRadius: 16, padding: 15, marginTop: 12, backgroundColor: '#4F7CFF' },
     ctaText: { fontWeight: '800', fontSize: 16, color: '#FFF' },
-    found: { marginTop: 12, borderWidth: 1.5, borderColor: '#34D399', backgroundColor: 'rgba(52,211,153,.07)', borderRadius: 16, padding: 14 },
-    foundHead: { flexDirection: 'row', alignItems: 'center', gap: 8 },
-    foundTitle: { fontSize: 14, fontWeight: '800', color: '#A7F3D0', flex: 1 },
-    foundStem: { fontSize: 14, fontWeight: '700', color: '#F2F5F9', marginTop: 8, lineHeight: 20 },
-    foundOpt: { fontSize: 13, color: '#B9C3D4', marginTop: 3 },
-    fallback: { flexDirection: 'row', alignItems: 'center', gap: 8, marginTop: 14, paddingVertical: 8 },
-    fallbackText: { fontSize: 13, color: '#8A94A6' },
-    input: { backgroundColor: '#0D121C', borderRadius: 12, padding: 12, fontSize: 14, color: '#F2F5F9', minHeight: 110, marginTop: 6, textAlignVertical: 'top' },
+    manual: { flexDirection: 'row', alignItems: 'center', gap: 8, marginTop: 10, backgroundColor: '#131A26', borderRadius: 12, padding: 13 },
+    manualText: { fontSize: 13.5, fontWeight: '600', color: theme.accent },
     warn: { flexDirection: 'row', gap: 8, backgroundColor: 'rgba(251,191,36,.07)', borderRadius: 12, padding: 11, marginTop: 8 },
     warnText: { fontSize: 12.5, color: '#B9C3D4', flex: 1 },
   });

@@ -15,7 +15,7 @@ const ROWS: { icon: string; title: string; sub: string; route: string; params: a
   { icon: 'camera', title: 'Камера', sub: 'Снять вопрос прямо сейчас', route: 'ApoCapture', params: {} },
   { icon: 'image', title: 'Скриншот', sub: 'Выбрать из галереи', route: 'ApoCapture', params: { tab: 'gallery' } },
   { icon: 'document-text', title: 'Документ', sub: 'PDF, Word, изображение', route: 'ApoConvert', params: {} },
-  { icon: 'text', title: 'Вставить текст', sub: 'Вопрос и варианты разложим сами', route: 'ApoConvert', params: { tab: 'text' } },
+  { icon: 'text', title: 'Ввести вручную', sub: 'Вопрос и варианты — по полям', route: 'ApoManual', params: {} },
 ];
 
 export default function ApoHomeScreen({ navigation }: Props) {
