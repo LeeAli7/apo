@@ -7,7 +7,9 @@
     "icon": "./assets/icon.png",
     "userInterfaceStyle": "dark",
     "splash": {
-      "backgroundColor": "#0d0d0d"
+      "image": "./assets/splash.png",
+      "resizeMode": "cover",
+      "backgroundColor": "#2B4BD8"
     },
     "ios": {
       "supportsTablet": true,
@@ -16,7 +18,7 @@
     "android": {
       "package": "com.apo.app",
       "adaptiveIcon": {
-        "backgroundColor": "#0d0d0d",
+        "backgroundColor": "#2B4BD8",
         "foregroundImage": "./assets/adaptive-icon.png"
       },
       "predictiveBackGestureEnabled": false

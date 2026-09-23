@@ -16,6 +16,8 @@ import ApoResultScreen from './ApoResultScreen';
 import ApoPaywallScreen from './ApoPaywallScreen';
 import ApoHistoryScreen from './ApoHistoryScreen';
 import ApoManualScreen from './ApoManualScreen';
+import ApoBootScreen from './ApoBootScreen';
+import ApoOnboardScreen from './ApoOnboardScreen';
 import ApoDrawerScreen from './ApoDrawerScreen';
 
 const Stack = createNativeStackNavigator();
@@ -27,6 +29,8 @@ function Shell() {
   return (
     <View style={s.root}>
       <Stack.Navigator screenOptions={{ headerShown: false, animation: 'slide_from_right' }}>
+        <Stack.Screen name="ApoBoot" component={ApoBootScreen} options={{ animation: 'fade' }} />
+        <Stack.Screen name="ApoOnboard" component={ApoOnboardScreen} options={{ animation: 'fade' }} />
         <Stack.Screen name="ApoHome" component={ApoHomeScreen} />
         <Stack.Screen name="ApoCapture" component={ApoCaptureScreen} />
         <Stack.Screen name="ApoConvert" component={ApoConvertScreen} />
@@ -65,4 +69,4 @@ const s = StyleSheet.create({
   drawer: { width: DRAWER_W, backgroundColor: '#0D121C' },
 });
 
-export { ApoHomeScreen, ApoCaptureScreen, ApoConvertScreen, ApoSolvingScreen, ApoResultScreen, ApoPaywallScreen, ApoHistoryScreen, ApoManualScreen, ApoDrawerScreen };
+export { ApoHomeScreen, ApoCaptureScreen, ApoConvertScreen, ApoSolvingScreen, ApoResultScreen, ApoPaywallScreen, ApoHistoryScreen, ApoManualScreen, ApoBootScreen, ApoOnboardScreen, ApoDrawerScreen };
