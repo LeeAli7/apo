@@ -8,6 +8,8 @@ on:
 jobs:
   build:
     runs-on: ubuntu-latest
+    env:
+      EXPO_PUBLIC_APO_API_URL: https://apo-proxy.apo-proxy.workers.dev
     steps:
       - uses: actions/checkout@v4
 
