@@ -24,38 +24,25 @@ export interface SolveResult {
   error?: string;
 }
 
-function errorResult(code: string): SolveResult {
-  return {
-    choice: '',
-    choiceIndex: -1,
-    probabilities: [],
-    confidence: 0,
-    lowAccuracy: true,
-    provider: 'none',
-    cacheHit: false,
-    error: code,
-  };
-}
-
 export async function solveTest(input: SolveInput): Promise<SolveResult> {
-  if (input.options.length === 0) return errorResult('open-question');
-  if (!apiConfigured()) return errorResult('no-server');
-  try {
-    const deviceId = await getDeviceId();
-    const r = await solveRemote(deviceId, null, input.stem, input.options);
-    const idx = r.choiceIndex >= 0 && r.choiceIndex < input.options.length ? r.choiceIndex : -1;
-    return {
-      choice: idx >= 0 ? input.options[idx] : '',
-      choiceIndex: idx,
-      probabilities: r.probabilities,
-      confidence: r.confidence,
-      lowAccuracy: r.lowAccuracy,
-      provider: r.provider,
-      cacheHit: r.cached,
-    };
-  } catch (e) {
-    return errorResult(e instanceof ApoApiError ? e.code : 'request-failed');
-  }
+  if (input.options.length === 0) throw new ApoApiError('open-question', 'Need 2+ options', 422);
+  if (!apiConfigured()) throw new ApoApiError('no-server', 'Backend URL is not configured');
+  // Transport/provider failures THROW (timeout, no-server, quota-exceeded,
+  // no-provider-key): Solving catches them into a visible error instead of
+  // spinning forever or rendering an invented empty answer.
+  const deviceId = await getDeviceId();
+  const r = await solveRemote(deviceId, null, input.stem, input.options);
+  const idx = r.choiceIndex >= 0 && r.choiceIndex < input.options.length ? r.choiceIndex : -1;
+  if (idx < 0) throw new ApoApiError('bad-response', 'Backend returned an unusable choice');
+  return {
+    choice: input.options[idx],
+    choiceIndex: idx,
+    probabilities: r.probabilities,
+    confidence: r.confidence,
+    lowAccuracy: r.lowAccuracy,
+    provider: r.provider,
+    cacheHit: r.cached,
+  };
 }
 
 export interface ChoicePayload {

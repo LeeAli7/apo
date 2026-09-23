@@ -20,6 +20,23 @@ export class ApoApiError extends Error {
   }
 }
 
+/** Hard ceiling for every backend call — matches the worker's 25s upstream cap. */
+export const APO_API_TIMEOUT_MS = 30000;
+
+/** fetch with AbortController timeout. Exported as a test seam. */
+export async function fetchWithTimeout(url: string, init: RequestInit, ms: number): Promise<Response> {
+  const ctrl = new AbortController();
+  const timer = setTimeout(() => ctrl.abort(), ms);
+  try {
+    return await fetch(url, { ...init, signal: ctrl.signal });
+  } catch (e) {
+    if (ctrl.signal.aborted) throw new ApoApiError('timeout', `Backend did not answer in ${ms} ms`);
+    throw e;
+  } finally {
+    clearTimeout(timer);
+  }
+}
+
 interface ApiEnvelope {
   error?: string;
   [k: string]: unknown;
@@ -29,12 +46,17 @@ async function apiFetch<T>(path: string, body: unknown): Promise<T> {
   if (!apiConfigured()) throw new ApoApiError('no-server', 'Backend URL is not configured (EXPO_PUBLIC_APO_API_URL)');
   let res: Response;
   try {
-    res = await fetch(`${APO_API_URL}${path}`, {
-      method: body === undefined ? 'GET' : 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: body === undefined ? undefined : JSON.stringify(body),
-    });
-  } catch {
+    res = await fetchWithTimeout(
+      `${APO_API_URL}${path}`,
+      {
+        method: body === undefined ? 'GET' : 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: body === undefined ? undefined : JSON.stringify(body),
+      },
+      APO_API_TIMEOUT_MS,
+    );
+  } catch (e) {
+    if (e instanceof ApoApiError) throw e;
     throw new ApoApiError('no-server', 'Backend is unreachable');
   }
   let data: ApiEnvelope;
