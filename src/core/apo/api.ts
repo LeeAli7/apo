@@ -77,6 +77,7 @@ export interface RemoteSolve {
   provider: string;
   cached: boolean;
   ms: number;
+  refined?: boolean;
 }
 
 export interface RemoteStructure {

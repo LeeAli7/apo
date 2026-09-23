@@ -106,6 +106,7 @@ export async function solveTest(question: string, options: string[]): Promise<Ap
     confidence: r.probabilities,
     ms: Date.now() - t0,
     lowAccuracy: r.lowAccuracy,
+    refined: r.refined ?? false,
   };
 }
 

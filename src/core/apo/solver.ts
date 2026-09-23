@@ -20,6 +20,7 @@ export interface SolveResult {
   lowAccuracy: boolean;
   provider: string;
   cacheHit: boolean;
+  refined?: boolean;
   /** Present when no answer was produced: 'no-server' | provider codes. */
   error?: string;
 }
@@ -42,6 +43,7 @@ export async function solveTest(input: SolveInput): Promise<SolveResult> {
     lowAccuracy: r.lowAccuracy,
     provider: r.provider,
     cacheHit: r.cached,
+    refined: r.refined ?? false,
   };
 }
 
