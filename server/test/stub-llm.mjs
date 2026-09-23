@@ -20,6 +20,11 @@ export function startStub(port) {
         if (req.url === '/chat/completions') {
           stubHits.deepseek += 1;
           const msgs = Array.isArray(body.messages) ? body.messages : [];
+          const parts = msgs.flatMap((m) => (Array.isArray(m.content) ? m.content : []));
+          if (parts.some((p) => p && p.type === 'image_url')) {
+            send(res, 200, { choices: [{ message: { content: 'Столица Франции?\nA. Берлин\nB. Париж\nC. Рим' } }] });
+            return;
+          }
           const last = msgs.length > 0 ? String(msgs[msgs.length - 1].content ?? '') : '';
           const fmt = body.response_format && body.response_format.type === 'json_object';
           if (fmt && /JSON вида \{"index"/.test(String(msgs[0]?.content ?? ''))) {

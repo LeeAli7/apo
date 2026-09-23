@@ -9,12 +9,15 @@ export {
   structureRemote,
   explainRemote,
   quotaRemote,
+  parseDocumentRemote,
   ApoApiError,
   APO_API_URL,
   type RemoteSolve,
   type RemoteStructure,
   type RemoteExplain,
   type RemoteQuota,
+  type RemoteParsedDocument,
+  type RemoteParsedQuestion,
 } from './api';
 export {
   ingestFile,

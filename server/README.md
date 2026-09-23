@@ -27,6 +27,11 @@ Gate: `node ../node_modules/typescript/lib/tsc.js -p server/tsconfig.json`
   `no-provider-key` (503, quota untouched), `quota-exceeded` (402).
 - `POST /v1/explain {deviceId, idToken?, stem, answer}` — cached explanation
   or model-generated. No quota burn.
+- `POST /v1/parse-document {deviceId, idToken?, filename, dataBase64}` —
+  binary attachments in, `{text, questions[], warnings[]}` out. txt/md/csv
+  direct; docx zero-dep parse; pdf text layer, scan pages via embedded-image
+  vision OCR; photos via vision OCR. Empty input is the only case with empty
+  questions. No quota burn. Max 15 MB file / 20 MB body.
 - `GET /v1/quota?deviceId=&idToken=` — `{remaining, pro, freeDaily}`.
 - `POST /v1/auth/google {idToken}` — verifies Google ID token.
 - `POST /v1/billing/verify {idToken, purchaseToken, productId}` — Play

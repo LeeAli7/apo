@@ -9,9 +9,13 @@ import {
   deepseekStructure,
   deepseekExplain,
   deepseekFallbackChoice,
+  deepseekVisionOcr,
   jevChoice,
   type Structured,
 } from './providers';
+import { docxToText } from './docx';
+import { pdfExtract } from './pdf';
+import { splitQuestions } from './split';
 
 export const ACCURACY_GATE = 0.75;
 
@@ -126,4 +130,149 @@ export async function explainAnswer(
   const text = await deepseekExplain(env, cleanStem, cleanAnswer);
   db.putExplanation(key, text);
   return { text, cached: false };
+}
+
+export interface ParsedQuestion {
+  stem: string;
+  options: string[];
+  open: boolean;
+}
+
+export interface ParsedDocument {
+  text: string;
+  questions: ParsedQuestion[];
+  warnings: string[];
+}
+
+const MAX_DOC_BYTES = 15 * 1024 * 1024;
+
+function extOf(filename: string): string {
+  const base = filename.split('/').pop() ?? filename;
+  const i = base.lastIndexOf('.');
+  if (i <= 0 || i === base.length - 1) return '';
+  return base.slice(i + 1).toLowerCase();
+}
+
+const IMAGE_MIME: Record<string, string> = {
+  jpg: 'image/jpeg',
+  jpeg: 'image/jpeg',
+  png: 'image/png',
+  webp: 'image/webp',
+};
+
+function isMostlyText(buf: Buffer): boolean {
+  if (buf.length === 0) return false;
+  const sample = buf.subarray(0, 4096);
+  let bad = 0;
+  for (const b of sample) {
+    if (b === 0 || (b < 8 && b !== 9 && b !== 10 && b !== 13)) bad++;
+  }
+  return bad / sample.length < 0.05;
+}
+
+/**
+ * Binary attachments -> {text, questions[], warnings[]}.
+ * txt/md/csv: direct. docx: zero-dep parse. pdf: text layer, scan pages via
+ * embedded-image vision OCR. photos: vision OCR. Empty input is the ONLY
+ * case that yields empty questions with an 'empty-*' warning.
+ */
+export async function parseDocument(
+  env: ServerEnv,
+  filename: string,
+  dataBase64: string,
+): Promise<ParsedDocument> {
+  const warnings: string[] = [];
+  let buf: Buffer;
+  try {
+    buf = Buffer.from(dataBase64, 'base64');
+  } catch {
+    throw new ProviderError('bad-request', 'dataBase64 is not valid base64', 400);
+  }
+  if (buf.length === 0) return { text: '', questions: [], warnings: ['empty-file: файл пустой (0 байт)'] };
+  if (buf.length > MAX_DOC_BYTES) {
+    throw new ProviderError('too-large', 'File exceeds 15 MB', 413);
+  }
+  const ext = extOf(filename);
+  let text = '';
+
+  if (['txt', 'md', 'markdown', 'csv', 'log'].includes(ext) || (ext === '' && isMostlyText(buf))) {
+    text = buf.toString('utf8');
+  } else if (ext === 'docx') {
+    try {
+      text = docxToText(buf);
+    } catch {
+      throw new ProviderError('bad-document', 'Cannot parse .docx — file may be corrupt', 422);
+    }
+    if (!text) return { text: '', questions: [], warnings: ['empty-docx: в документе нет извлекаемого текста'] };
+  } else if (ext === 'pdf') {
+    let pages: { index: number; text: string; images: { png: Buffer }[] }[];
+    try {
+      pages = await pdfExtract(buf);
+    } catch {
+      throw new ProviderError('bad-document', 'Cannot parse PDF — file may be corrupt', 422);
+    }
+    const parts: string[] = [];
+    for (const page of pages) {
+      if (page.text.trim()) {
+        parts.push(page.text);
+        continue;
+      }
+      if (page.images.length === 0) continue;
+      if (!env.deepseekApiKey) {
+        warnings.push(`scan-needs-model-key: страница ${page.index} — скан без текстового слоя, нужен ключ модели для OCR`);
+        continue;
+      }
+      const ocr: string[] = [];
+      for (const img of page.images) {
+        try {
+          ocr.push(await deepseekVisionOcr(env, img.png.toString('base64'), 'image/png'));
+        } catch {
+          warnings.push(`ocr-failed: страница ${page.index} не распозналась`);
+        }
+      }
+      if (ocr.length > 0) parts.push(ocr.join('\n'));
+    }
+    text = parts.join('\n\n');
+    if (!text.trim()) {
+      return { text: '', questions: [], warnings: warnings.length > 0 ? warnings : ['empty-pdf: в PDF нет ни текста, ни картинок'] };
+    }
+  } else if (IMAGE_MIME[ext] !== undefined) {
+    if (!env.deepseekApiKey) throw new ProviderError('no-provider-key', 'DEEPSEEK_API_KEY is not set', 503);
+    text = await deepseekVisionOcr(env, buf.toString('base64'), IMAGE_MIME[ext]);
+  } else if (isMostlyText(buf)) {
+    text = buf.toString('utf8');
+  } else {
+    throw new ProviderError('unsupported-format', `Format .${ext || '?'} has no readable text`, 422);
+  }
+
+  if (!text.trim()) return { text: '', questions: [], warnings: ['empty-text: из файла не извлеклось текста'] };
+
+  // Multi-question split locally; model structures only ambiguous chunks.
+  const chunks = splitQuestions(text);
+  const questions: ParsedQuestion[] = [];
+  let structureWarned = false;
+  for (const chunk of chunks) {
+    if (chunk.options.length >= 2) {
+      questions.push({ stem: chunk.stem, options: chunk.options, open: false });
+      continue;
+    }
+    if (!chunk.stem) continue;
+    try {
+      const s = await deepseekStructure(env, `${chunk.stem}\n${chunk.options.join('\n')}`);
+      if (s.stem || s.options.length > 0) {
+        questions.push({ stem: s.stem || chunk.stem, options: s.options, open: s.open });
+        continue;
+      }
+    } catch (e) {
+      if (e instanceof ProviderError && e.code === 'no-provider-key' && !structureWarned) {
+        warnings.push('structure-unavailable: нет ключа модели — неоднозначные куски остались открытыми');
+        structureWarned = true;
+      }
+    }
+    questions.push({ stem: chunk.stem, options: chunk.options, open: true });
+  }
+  if (questions.length === 0) {
+    return { text, questions: [{ stem: text.slice(0, 2000), options: [], open: true }], warnings };
+  }
+  return { text, questions, warnings };
 }

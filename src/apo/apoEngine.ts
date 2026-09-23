@@ -51,11 +51,23 @@ export function parseAllQuestions(raw: string): ApoQuestion[] {
 }
 
 // ingestFile: файл (камера/галерея/PDF/DOCX/текст) -> текст + вопросы + предупреждения.
-// Текст разбирается локально; если локальный разбор не дал структуры,
-// backend доразбирает моделью. Фото без текста — честное предупреждение.
-export async function ingestFile(name: string, text: string): Promise<ApoIngestResult> {
+// Текст разбирается локально; бинарные вложения (фото/PDF/DOCX) уходят на
+// backend через uri. Без uri бинарник разобрать не из чего — честное предупреждение.
+export async function ingestFile(name: string, text: string, uri?: string): Promise<ApoIngestResult> {
   const warnings: string[] = [];
   if (!text.trim()) {
+    if (uri) {
+      const r = await coreIngestFile({ name, uri });
+      return {
+        text: r.text,
+        questions: r.questions.map((q) => ({
+          id: hashString(q.stem + '|' + q.options.join('|')),
+          stem: q.stem || 'Вопрос',
+          options: q.options.slice(0, 8).map((t, i) => ({ key: OPTION_KEYS[i] ?? `V${i + 1}`, text: t })),
+        })),
+        warnings: [...warnings, ...r.warnings],
+      };
+    }
     return { text, questions: [], warnings: ['Пустой документ — нечего решать'] };
   }
   const parsed = parseQuestions(text);
