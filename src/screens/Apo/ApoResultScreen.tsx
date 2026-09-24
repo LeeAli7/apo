@@ -9,6 +9,7 @@ import { useApoUI } from './apoUI';
 import { APO_CONFIDENCE_THRESHOLD } from '../../apo/apoTypes';
 import { explainText } from '../../apo/apoEngine';
 import { pushHistory } from '../../core/apo';
+import { RichText } from './richText';
 import type { BatchResult } from './ApoSolvingScreen';
 
 declare const require: any;
@@ -46,7 +47,6 @@ export default function ApoResultScreen({ navigation, route }: Props) {
   const [sel, setSel] = useState(0);
   const cur = batch[Math.min(sel, batch.length - 1)];
   const answer = cur.options[cur.answerIndex] ?? '—';
-  const top = cur.answerIndex >= 0 ? cur.confidence[cur.answerIndex] ?? 0 : 0;
   const [explains, setExplains] = useState<Record<number, string>>({});
   const [busyIdx, setBusyIdx] = useState<number | null>(null);
 
@@ -118,33 +118,25 @@ export default function ApoResultScreen({ navigation, route }: Props) {
 
       <View style={s.ans}>
         <Text style={s.ansLab}>Ответ · {(cur.ms / 1000).toFixed(1)} c</Text>
-        <Text style={s.ansStem} numberOfLines={3}>{cur.question}</Text>
         <Text style={s.ansBig}>{answer}</Text>
         {cur.refined && (
           <View style={s.refined}>
             <Ionicons name="sparkles" size={14} color="#B9C9EE" />
-            <Text style={s.refinedText}>Ответ уточнён второй моделью</Text>
+            <Text style={s.refinedText}>Ответ перепроверен второй моделью</Text>
           </View>
         )}
         {cur.error && (
           <Text style={s.errText}>Не решился — попробуйте ещё раз</Text>
         )}
-        {cur.options.map((o, i) => (
-          <View key={i} style={s.prob}>
-            <Text style={s.probText}>{o}</Text>
-            <Text style={s.probVal}>{Math.round((cur.confidence[i] ?? 0) * 100)}%</Text>
-          </View>
-        ))}
       </View>
 
       {cur.lowAccuracy && cur.answerIndex >= 0 && (
         <View style={s.warn}>
           <Ionicons name="warning" size={18} color="#FCD34D" />
           <View style={s.warnTextWrap}>
-            <Text style={s.warnTitle}>Точность ниже {THRESH_PCT}% — проверьте ответ</Text>
+            <Text style={s.warnTitle}>Точность ниже {THRESH_PCT}% — перепроверяем автоматически</Text>
             <Text style={s.warnSub}>
-              Уверенность {Math.round(top * 100)}%, порог {THRESH_PCT}%.
-              Разбор — по кнопке ниже.
+              Вторая модель уже уточняет ответ. Разбор — по кнопке ниже.
             </Text>
           </View>
         </View>
@@ -165,7 +157,7 @@ export default function ApoResultScreen({ navigation, route }: Props) {
 
       {explains[sel] && (
         <View style={s.card}>
-          <Text style={s.expl}>{explains[sel]}</Text>
+          <RichText text={explains[sel]} />
         </View>
       )}
 

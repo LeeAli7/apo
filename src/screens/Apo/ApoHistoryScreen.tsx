@@ -41,7 +41,7 @@ export default function ApoHistoryScreen({ navigation }: Props) {
         <View key={i} style={s.card}>
           <Text style={s.q} numberOfLines={3}>{h.stem}</Text>
           <Text style={s.ansSmall}>
-            {h.choice} · {Math.round(h.confidence * 100)}%{h.lowAccuracy ? ' · проверь' : ''}
+            {h.choice}{h.lowAccuracy ? ' · перепроверен' : ''}
           </Text>
         </View>
       ))}

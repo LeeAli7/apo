@@ -6,7 +6,7 @@ import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { Ionicons } from '@expo/vector-icons';
 import { useTheme } from './apoTheme';
 import { useApoUI } from './apoUI';
-import { isPro, readHistory, APO_KEYS, saveJson } from '../../core/apo';
+import { isPro, readHistory, APO_KEYS, saveJson, type HistoryEntry } from '../../core/apo';
 
 interface Props {
   navigation: any;
@@ -20,7 +20,7 @@ export default function ApoDrawerScreen({ navigation }: Props) {
   const insets = useSafeAreaInsets();
   const s = styles(theme, insets);
   const [pro, setProState] = useState(false);
-  const [recent, setRecent] = useState<{ stem: string; choice: string; confidence: number }[]>([]);
+  const [recent, setRecent] = useState<HistoryEntry[]>([]);
   const [lang, setLang] = useState<'ru' | 'en'>('ru');
 
   React.useEffect(() => {
@@ -64,7 +64,7 @@ export default function ApoDrawerScreen({ navigation }: Props) {
       {recent.map((h, i) => (
         <View key={i} style={s.hist}>
           <Text style={s.histStem} numberOfLines={2}>{h.stem}</Text>
-          <Text style={s.histAns}>{h.choice} · {Math.round(h.confidence * 100)}%</Text>
+          <Text style={s.histAns}>{h.choice}{h.lowAccuracy ? ' · перепроверен' : ''}</Text>
         </View>
       ))}
       <Pressable style={s.row} onPress={() => go('ApoHistory')}>

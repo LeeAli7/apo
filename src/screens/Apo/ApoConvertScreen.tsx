@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useEffect, useRef, useState } from 'react';
 import {
   View, Text, Pressable, StyleSheet, ScrollView, Alert,
   ActivityIndicator,
@@ -24,6 +24,7 @@ export default function ApoConvertScreen({ navigation, route }: Props) {
   const [files, setFiles] = useState(incoming);
   const [busy, setBusy] = useState(false);
   const [warnings, setWarnings] = useState<string[]>([]);
+  const autoStarted = useRef(false);
 
   const pickDoc = async () => {
     try {
@@ -53,8 +54,9 @@ export default function ApoConvertScreen({ navigation, route }: Props) {
     });
   };
 
-  const startFromFiles = async () => {
-    if (files.length === 0) {
+  const startFromFiles = async (list?: { name: string; uri: string }[]) => {
+    const target = list ?? files;
+    if (target.length === 0) {
       Alert.alert('Нет файлов', 'Добавьте PDF, Word или изображение');
       return;
     }
@@ -62,7 +64,7 @@ export default function ApoConvertScreen({ navigation, route }: Props) {
     try {
       const warns: string[] = [];
       let all: { stem: string; options: { key: string; text: string }[] }[] = [];
-      for (const f of files) {
+      for (const f of target) {
         const r = await ingestFile(f.name, '', f.uri);
         warns.push(...r.warnings.map((w) => `${f.name}: ${w}`));
         all = all.concat(r.questions);
@@ -78,6 +80,14 @@ export default function ApoConvertScreen({ navigation, route }: Props) {
       setBusy(false);
     }
   };
+
+  // Крит-ситуация: пришли с камеры/галереи — решаем сразу, без лишнего тапа.
+  useEffect(() => {
+    if (!autoStarted.current && incoming.length > 0) {
+      autoStarted.current = true;
+      startFromFiles(incoming);
+    }
+  }, []);
 
   return (
     <ScrollView style={s.container} contentContainerStyle={s.content}>
@@ -111,7 +121,7 @@ export default function ApoConvertScreen({ navigation, route }: Props) {
       </Pressable>
 
       {files.length > 0 && (
-        <Pressable style={s.cta} onPress={startFromFiles} disabled={busy}>
+        <Pressable style={s.cta} onPress={() => startFromFiles()} disabled={busy}>
           {busy ? (
             <ActivityIndicator color="#FFF" />
           ) : (
